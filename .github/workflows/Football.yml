@@ -1,10 +1,9 @@
-name: Football Sceduller
+name: Football Scheduler
 
 on:
   schedule:
-    # S'exécute tous les jours à 08:00 UTC (9:00 au Maroc)
     - cron: '0 8 * * *'
-  workflow_dispatch: # Permet de lancer le script manuellement pour tester
+  workflow_dispatch:
 
 jobs:
   build:
@@ -23,13 +22,11 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        playwright install chromium
 
     - name: Exécuter le scraper
       env:
-        # On injecte les secrets GitHub dans le script
+        # CORRECTION ICI : Ajout de "secrets."
         FOOT_API: ${{ secrets.FOOT_API }}
         TELEGRAM_API: ${{ secrets.TELEGRAM_API }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python scraper.py
-      
