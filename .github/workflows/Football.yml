@@ -23,10 +23,10 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Exécuter le scraper
+    - name: Exécuter le main
       env:
         # CORRECTION ICI : Ajout de "secrets."
         FOOT_API: ${{ secrets.FOOT_API }}
         TELEGRAM_API: ${{ secrets.TELEGRAM_API }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      run: python scraper.py
+      run: python main.py
