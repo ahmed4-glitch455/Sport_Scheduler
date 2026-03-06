@@ -1,200 +1,147 @@
 import requests
 import os
 import logging
-import sys
-from datetime import datetime, timedelta
+from datetime import datetime
+import json
+
+# --- CONFIGURATION ---
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "aae4f48e19msh089011944c89f58p11391cjsne9ade8487bd1")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # Configuration logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# --- DIAGNOSTIC ---
-print("=" * 60)
-print("🔍 DIAGNOSTIC DES VARIABLES D'ENVIRONNEMENT")
-print("=" * 60)
-
-FOOT_API = os.getenv("FOOT_API")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
-print(f"FOOT_API: {'✅ Présente' if FOOT_API else '❌ MANQUANTE'}")
-if FOOT_API:
-    print(f"  → Longueur: {len(FOOT_API)} caractères")
-    print(f"  → Début: {FOOT_API[:5]}...")
-
-print(f"TELEGRAM_BOT_TOKEN: {'✅ Présent' if TELEGRAM_BOT_TOKEN else '❌ MANQUANT'}")
-if TELEGRAM_BOT_TOKEN:
-    print(f"  → LongeUr: {len(TELEGRAM_BOT_TOKEN)} caractères")
-
-print(f"TELEGRAM_CHAT_ID: {'✅ Présent' if TELEGRAM_CHAT_ID else '❌ MANQUANT'}")
-print("=" * 60)
-
-# Configuration des ligues (IDs SportMonks v3)
-LEAGUES = {
-    "ligue1": {"id": 13, "name": "Ligue 1", "country": "France", "emoji": "🇫🇷"},
-    "premier-league": {"id": 8, "name": "Premier League", "country": "Angleterre", "emoji": "🏴󠁧󠁢󠁥󠁮󠁧󠁿"},
-    "laliga": {"id": 12, "name": "LaLiga", "country": "Espagne", "emoji": "🇪🇸"},
-    "serie-a": {"id": 11, "name": "Serie A", "country": "Italie", "emoji": "🇮🇹"},
-    "bundesliga": {"id": 9, "name": "Bundesliga", "country": "Allemagne", "emoji": "🇩🇪"},
-    "champions-league": {"id": 3, "name": "Ligue des Champions", "country": "Europe", "emoji": "🏆"}
-}
-
-class SportMonksAPI:
-    """Client pour l'API SportMonks v3"""
-    
-    # Différents endpoints à tester
-    ENDPOINTS = {
-        "fixtures": "/fixtures/date/{date}",
-        "livescores": "/livescores",
-        "leagues": "/leagues",
-        "seasons": "/seasons"
-    }
+class RapidFootballAPI:
+    """Client pour l'API Football gratuite sur RapidAPI"""
     
     def __init__(self, api_key):
         self.api_key = api_key
-        self.base_url = "https://api.sportmonks.com/v3/football"
-        self.session = requests.Session()
-        print(f"✅ Client SportMonks initialisé")
+        self.host = "free-football-api-data.p.rapidapi.com"
+        self.base_url = f"https://{self.host}"
+        self.headers = {
+            'x-rapidapi-key': api_key,
+            'x-rapidapi-host': self.host
+        }
     
-    def test_endpoints(self):
-        """Teste différents endpoints pour trouver celui qui fonctionne"""
-        print("\n🔍 Test des endpoints SportMonks...")
-        
-        today = datetime.now().strftime("%Y-%m-%d")
-        
-        # Tester l'endpoint fixtures
-        url = f"{self.base_url}/fixtures/date/{today}"
-        params = {"api_token": self.api_key, "per_page": 1}
+    def get_live_matches(self):
+        """Récupère les matchs en direct"""
+        url = f"{self.base_url}/football-live-scores"
         
         try:
-            response = self.session.get(url, params=params, timeout=10)
-            print(f"📌 Endpoint fixtures/date: {response.status_code}")
-            
-            if response.status_code == 200:
-                print("✅ Endpoint fixtures fonctionnel")
-                return "fixtures"
-        except:
-            pass
+            response = requests.get(url, headers=self.headers, timeout=10)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logging.error(f"Erreur live matches: {e}")
+            return None
+    
+    def get_todays_matches(self, date=None):
+        """Récupère les matchs du jour"""
+        if not date:
+            date = datetime.now().strftime("%Y-%m-%d")
         
-        # Tester l'endpoint livescores
-        url = f"{self.base_url}/livescores"
-        params = {"api_token": self.api_key, "per_page": 1}
+        # Note: L'endpoint exact dépend de l'API
+        # Essayez différents endpoints selon la documentation
+        endpoints = [
+            f"/football-today-matches?date={date}",
+            f"/football-fixtures?date={date}",
+            f"/football-schedule?date={date}"
+        ]
         
-        try:
-            response = self.session.get(url, params=params, timeout=10)
-            print(f"📌 Endpoint livescores: {response.status_code}")
-            
-            if response.status_code == 200:
-                print("✅ Endpoint livescores fonctionnel")
-                return "livescores"
-        except:
-            pass
+        for endpoint in endpoints:
+            try:
+                url = f"{self.base_url}{endpoint}"
+                logging.info(f"Tentative: {endpoint}")
+                
+                response = requests.get(url, headers=self.headers, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    if data and data.get('data') or data.get('matches'):
+                        return data
+            except:
+                continue
         
-        print("⚠️ Aucun endpoint standard ne fonctionne")
         return None
     
-    def get_todays_fixtures(self):
-        """Récupère les matchs du jour avec gestion d'erreur"""
-        today = datetime.now().strftime("%Y-%m-%d")
-        tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    def get_match_details(self, match_id):
+        """Récupère les détails d'un match spécifique"""
+        url = f"{self.base_url}/football-event-statistics"
+        params = {"eventid": match_id}
         
-        print(f"📅 Recherche des matchs...")
+        try:
+            response = requests.get(url, headers=self.headers, params=params, timeout=10)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logging.error(f"Erreur match details {match_id}: {e}")
+            return None
+    
+    def search_matches(self, query):
+        """Recherche des matchs par équipe/ligue"""
+        url = f"{self.base_url}/football-search"
+        params = {"query": query}
         
-        # Essayer plusieurs formats de date
-        for date in [today, tomorrow]:
-            # Essayer différents endpoints
-            endpoints = [
-                f"{self.base_url}/fixtures/date/{date}",
-                f"{self.base_url}/fixtures",
-                f"{self.base_url}/fixtures/between/{date}/{date}"
-            ]
-            
-            for url in endpoints:
-                params = {
-                    "api_token": self.api_key,
-                    "include": "localTeam;visitorTeam;league;tvStations",
-                    "per_page": 20
-                }
-                
-                # Ajouter le paramètre date pour l'endpoint fixtures simple
-                if "between" not in url and "date" not in url:
-                    params["filters"] = f"starting_at_date:{date}"
-                
-                try:
-                    print(f"🔄 Test: {url}")
-                    response = self.session.get(url, params=params, timeout=10)
-                    
-                    if response.status_code == 200:
-                        data = response.json()
-                        fixtures = data.get('data', [])
-                        
-                        # Vérifier si on a des résultats
-                        if fixtures:
-                            print(f"✅ {len(fixtures)} matchs trouvés")
-                            return fixtures
-                        else:
-                            print(f"⚠️ 0 matchs trouvés")
-                    
-                except Exception as e:
-                    print(f"❌ Erreur: {e}")
-                    continue
-        
-        print("❌ Aucun match trouvé")
-        return []
+        try:
+            response = requests.get(url, headers=self.headers, params=params, timeout=10)
+            return response.json()
+        except:
+            return None
     
     def get_leagues(self):
         """Récupère la liste des ligues disponibles"""
-        url = f"{self.base_url}/leagues"
-        params = {
-            "api_token": self.api_key,
-            "include": "country",
-            "per_page": 50
-        }
+        url = f"{self.base_url}/football-leagues"
         
         try:
-            response = self.session.get(url, params=params, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                return data.get('data', [])
+            response = requests.get(url, headers=self.headers, timeout=10)
+            return response.json()
         except:
-            pass
-        return []
+            return None
 
-def format_fixtures(fixtures):
-    """Formate les matchs pour Telegram"""
-    if not fixtures:
-        return "📭 Aucun match trouvé aujourd'hui.\n\nPeut-être qu'aucun match n'est programmé ou que l'API est en maintenance."
+def format_match_message(match_data):
+    """Formate les données d'un match pour Telegram"""
+    if not match_data:
+        return "📭 Aucune donnée disponible"
+    
+    message = "⚽ *Match Info*\n\n"
+    
+    # Adapter selon la structure de votre API
+    if isinstance(match_data, dict):
+        # Exemple de formatage
+        home = match_data.get('homeTeam', {}).get('name', '?')
+        away = match_data.get('awayTeam', {}).get('name', '?')
+        score = match_data.get('score', '? - ?')
+        status = match_data.get('status', '?')
+        time = match_data.get('time', '?')
+        
+        message += f"🏆 {home} vs {away}\n"
+        message += f"⚽ Score: {score}\n"
+        message += f"⏱️ Status: {status} {time}\n"
+        
+        # Chaînes TV (si disponibles)
+        tv = match_data.get('tvStations', [])
+        if tv:
+            message += f"📺 {', '.join(tv)}\n"
+    
+    return message
+
+def format_matches_list(matches):
+    """Formate une liste de matchs"""
+    if not matches or not isinstance(matches, list):
+        return "📭 Aucun match trouvé"
     
     message = "📅 *Matchs du jour*\n\n"
     
-    for match in fixtures[:10]:  # Limiter à 10 matchs
-        # Équipes
-        home = match.get('localTeam', {}).get('data', {}).get('name', '?')
-        away = match.get('visitorTeam', {}).get('data', {}).get('name', '?')
+    for match in matches[:10]:  # Limiter à 10
+        home = match.get('homeTeam', {}).get('name', '?')
+        away = match.get('awayTeam', {}).get('name', '?')
+        time = match.get('time', '?')
+        league = match.get('league', {}).get('name', '')
         
-        # Heure du match
-        starting_at = match.get('starting_at', '')
-        if starting_at:
-            time = starting_at[11:16] if len(starting_at) > 16 else '?'
-        else:
-            time = '?'
-        
-        # Ligue
-        league = match.get('league', {}).get('data', {}).get('name', '')
-        
-        message += f"⏱️ {time}\n"
         if league:
             message += f"🏆 {league}\n"
-        message += f"⚽ {home} vs {away}\n"
-        
-        # Chaînes TV
-        tv = match.get('tvStations', {}).get('data', [])
-        if tv:
-            channels = [t.get('name', '') for t in tv[:3]]
-            message += f"📺 {', '.join(channels)}\n"
-        
-        message += "\n"
+        message += f"⏱️ {time} - {home} vs {away}\n\n"
     
-    message += "#Football #Matchs #Sport"
     return message
 
 def send_telegram_message(message):
@@ -211,78 +158,67 @@ def send_telegram_message(message):
             },
             timeout=10
         )
-        
-        if response.status_code == 200:
-            print("✅ Message Telegram envoyé")
-            return True
-        else:
-            print(f"❌ Erreur Telegram: {response.status_code}")
-            return False
+        return response.status_code == 200
     except Exception as e:
-        print(f"❌ Erreur envoi: {e}")
+        logging.error(f"Erreur Telegram: {e}")
         return False
 
-def debug_api_info():
-    """Affiche des infos de débogage sur l'API"""
-    print("\n🔧 INFORMATIONS DE DÉBOGAGE")
-    print("=" * 40)
+def test_rapidapi_connection(api):
+    """Teste la connexion à RapidAPI"""
+    print("\n🔍 Test de connexion RapidAPI...")
     
-    # Version de l'API
-    print("📌 API Version: v3")
+    # Test 1: Récupérer les ligues
+    leagues = api.get_leagues()
+    if leagues:
+        print("✅ Endpoint /leagues fonctionne")
+    else:
+        print("❌ Endpoint /leagues échoué")
     
-    # Clé API
-    print(f"📌 Clé API: {FOOT_API[:5]}...{FOOT_API[-5:] if FOOT_API else ''}")
+    # Test 2: Récupérer les matchs du jour
+    today_matches = api.get_todays_matches()
+    if today_matches:
+        print("✅ Endpoint /matches fonctionne")
+    else:
+        print("❌ Endpoint /matches échoué")
     
-    # Date actuelle
-    now = datetime.now()
-    print(f"📌 Date: {now.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"📌 Jour de semaine: {now.strftime('%A')}")
-    
-    # Recommandations
-    print("\n💡 RECOMMANDATIONS:")
-    print("1. Vérifiez que votre clé API est active sur sportmonks.com")
-    print("2. Consultez la documentation: https://docs.sportmonks.com/football")
-    print("3. Essayez l'endpoint de test: curl -X GET \"https://api.sportmonks.com/v3/football/fixtures?api_token=VOTRE_CLE&per_page=1\"")
-    print("=" * 40)
+    # Test 3: Votre endpoint spécifique
+    match_details = api.get_match_details("12650707")
+    if match_details:
+        print("✅ Endpoint /event-statistics fonctionne")
+        print(f"📊 Données reçues: {json.dumps(match_details, indent=2)[:200]}...")
+    else:
+        print("❌ Endpoint /event-statistics échoué")
 
 def run():
     """Fonction principale"""
-    print("\n🚀 Démarrage du Bot Sport...\n")
+    print("\n🚀 Démarrage du Bot Football (RapidAPI)...\n")
     
-    # Vérifications de base
-    if not all([FOOT_API, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID]):
-        print("❌ Configuration incomplète")
-        return
+    # Initialisation
+    api = RapidFootballAPI(RAPIDAPI_KEY)
     
-    # Initialisation API
-    sport_api = SportMonksAPI(FOOT_API)
+    # Test de connexion
+    test_rapidapi_connection(api)
     
-    # Test des endpoints
-    working_endpoint = sport_api.test_endpoints()
+    # Récupérer les matchs du jour
+    print("\n📅 Recherche des matchs du jour...")
+    matches = api.get_todays_matches()
     
-    if not working_endpoint:
-        debug_api_info()
-        send_telegram_message("⚠️ *Problème avec l'API SportMonks*\n\nImpossible de se connecter. Vérifiez votre clé API.")
-        return
+    if matches:
+        message = format_matches_list(matches.get('data', []))
+    else:
+        # Fallback: utiliser votre endpoint spécifique
+        print("⚠️ Utilisation de l'endpoint de fallback...")
+        match = api.get_match_details("12650707")
+        if match:
+            message = format_match_message(match)
+        else:
+            message = "📭 Aucun match trouvé"
     
-    # Récupérer les matchs
-    fixtures = sport_api.get_todays_fixtures()
-    
-    # Formater et envoyer
-    message = format_fixtures(fixtures)
-    send_telegram_message(message)
-    
-    # Afficher un résumé
-    print(f"\n📊 Résumé: {len(fixtures)} matchs trouvés")
-    
-    if not fixtures:
-        # Suggestions pour le débogage
-        print("\n💡 Suggestions:")
-        print("1. Vérifiez qu'il y a des matchs aujourd'hui")
-        print("2. Testez votre clé sur le site SportMonks")
-        print("3. Vérifiez les IDs des ligues")
-    
-    print("\n✅ Bot exécuté avec succès")
+    # Envoyer sur Telegram
+    if send_telegram_message(message):
+        print("✅ Message envoyé!")
+    else:
+        print("❌ Échec envoi")
 
 if __name__ == "__main__":
     run()
