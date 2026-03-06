@@ -1,166 +1,172 @@
 import requests
 import os
+import logging
 from datetime import datetime, timedelta
-import time
 
 # --- CONFIGURATION ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-class FootballAPIDiagnostic:
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+class FootballOnlyAPI:
     """
-    Diagnostic complet pour trouver POURQUOI aucun match n'est trouvé
+    Client TheSportsDB qui ne garde que le football
     """
+    
+    # Liste des sports à GARDER (tout le reste est ignoré)
+    ALLOWED_SPORTS = [
+        'Soccer',           # Football
+        'Football',         # Variante
+        'Soccer - France',  # Football français
+        'Soccer - England', # Football anglais
+        'Soccer - Spain',   # Football espagnol
+        'Soccer - Italy',   # Football italien
+        'Soccer - Germany', # Football allemand
+    ]
     
     def __init__(self):
         self.session = requests.Session()
         self.base_url = "https://www.thesportsdb.com/api/v1/json/3"
-        
-        # Base de données de secours avec des IDs vérifiés
-        self.verified_leagues = {
-            # France - IDs vérifiés manuellement
-            "Ligue 1": 4334,
-            "Ligue 2": 4335,
-            "National": 4503,
-            
-            # Angleterre
-            "Premier League": 4328,
-            "Championship": 4329,
-            "League One": 4330,
-            "League Two": 4331,
-            
-            # Europe
-            "Champions League": 4323,  # Ligue des Champions
-            "Europa League": 4324,      # Europa League
-        }
+        logging.info("✅ Client FootballOnly initialisé")
     
-    def test_api_connection(self):
-        """Test basique : l'API répond-elle ?"""
-        print("\n📡 TEST 1: CONNEXION API")
-        try:
-            response = self.session.get(f"{self.base_url}/all_leagues.php", timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                leagues = data.get('leagues', [])
-                print(f"✅ API répond! {len(leagues)} ligues disponibles")
-                return True
-            else:
-                print(f"❌ Erreur HTTP: {response.status_code}")
-                return False
-        except Exception as e:
-            print(f"❌ Exception: {e}")
-            return False
-    
-    def test_date_format(self):
-        """Test différents formats de date"""
-        print("\n📡 TEST 2: FORMATS DE DATE")
-        today = datetime.now()
-        date_formats = [
-            today.strftime("%Y-%m-%d"),      # 2024-03-06
-            today.strftime("%d-%m-%Y"),      # 06-03-2024
-            today.strftime("%Y%m%d"),        # 20240306
-        ]
-        
-        for date_format in date_formats:
-            url = f"{self.base_url}/eventsday.php"
-            params = {'d': date_format}
-            
-            try:
-                response = self.session.get(url, params=params, timeout=5)
-                data = response.json()
-                events = data.get('events', [])
-                print(f"📅 Format {date_format}: {len(events)} matchs")
-            except:
-                print(f"📅 Format {date_format}: ❌ erreur")
-    
-    def test_known_league(self, league_id, league_name):
-        """Test une ligue spécifique"""
+    def get_todays_football(self):
+        """
+        Récupère UNIQUEMENT les matchs de football du jour
+        """
         today = datetime.now().strftime("%Y-%m-%d")
         url = f"{self.base_url}/eventsday.php"
-        params = {'d': today, 'l': league_id}
+        params = {'d': today}
+        
+        try:
+            response = self.session.get(url, params=params, timeout=10)
+            data = response.json()
+            all_events = data.get('events', [])
+            
+            # Filtrer pour ne garder que le football
+            football_events = []
+            for event in all_events:
+                sport = event.get('strSport', '')
+                
+                # Vérifier si c'est du football
+                if any(allowed.lower() in sport.lower() for allowed in self.ALLOWED_SPORTS):
+                    football_events.append(event)
+                    logging.info(f"⚽ Match trouvé: {event.get('strEvent', '?')}")
+                else:
+                    logging.info(f"🏈 Ignoré (pas football): {event.get('strSport', '?')} - {event.get('strEvent', '?')}")
+            
+            return football_events
+            
+        except Exception as e:
+            logging.error(f"❌ Erreur: {e}")
+            return []
+    
+    def get_next_football_days(self, days=5):
+        """
+        Cherche les prochains jours où il y a du football
+        """
+        football_days = []
+        today = datetime.now()
+        
+        for i in range(days):
+            date = (today + timedelta(days=i)).strftime("%Y-%m-%d")
+            events = self.get_football_by_date(date)
+            if events:
+                football_days.append({
+                    'date': date,
+                    'count': len(events),
+                    'events': events
+                })
+        
+        return football_days
+    
+    def get_football_by_date(self, date):
+        """
+        Récupère le football pour une date spécifique
+        """
+        url = f"{self.base_url}/eventsday.php"
+        params = {'d': date}
         
         try:
             response = self.session.get(url, params=params, timeout=5)
             data = response.json()
-            events = data.get('events', [])
+            all_events = data.get('events', [])
             
-            if events:
-                print(f"✅ {league_name}: {len(events)} matchs trouvés!")
-                return events
-            else:
-                print(f"ℹ️ {league_name}: 0 match aujourd'hui")
-                return []
-        except Exception as e:
-            print(f"❌ {league_name}: erreur - {e}")
+            return [e for e in all_events 
+                   if any(allowed.lower() in e.get('strSport', '').lower() 
+                         for allowed in self.ALLOWED_SPORTS)]
+        except:
             return []
-    
-    def search_any_event(self, days=7):
-        """Recherche S'IL EXISTE AU MOINS UN MATCH dans les X prochains jours"""
-        print(f"\n📡 TEST 3: RECHERCHE SUR {days} JOURS")
-        
-        today = datetime.now()
-        found_any = False
-        
-        for i in range(days):
-            date = (today + timedelta(days=i)).strftime("%Y-%m-%d")
-            url = f"{self.base_url}/eventsday.php"
-            params = {'d': date}
-            
-            try:
-                response = self.session.get(url, params=params, timeout=5)
-                data = response.json()
-                events = data.get('events', [])
-                
-                if events:
-                    print(f"✅ {date}: {len(events)} matchs trouvés!")
-                    found_any = True
-                    # Afficher les 3 premiers
-                    for event in events[:3]:
-                        home = event.get('strHomeTeam', '?')
-                        away = event.get('strAwayTeam', '?')
-                        league = event.get('strLeague', '?')
-                        print(f"   • {league}: {home} vs {away}")
-                else:
-                    print(f"ℹ️ {date}: 0 match")
-            except:
-                print(f"⚠️ {date}: erreur")
-            
-            time.sleep(1)  # Politesse
-        
-        return found_any
-    
-    def test_alternative_endpoints(self):
-        """Test d'autres endpoints de l'API"""
-        print("\n📡 TEST 4: ENDPOINTS ALTERNATIFS")
-        
-        today = datetime.now().strftime("%Y-%m-%d")
-        
-        # Endpoint 1: next events
-        url1 = f"{self.base_url}/eventsnextleague.php"
-        params1 = {'id': 4328}  # Premier League
-        
-        try:
-            response = self.session.get(url1, params=params1, timeout=5)
-            data = response.json()
-            events = data.get('events', [])
-            print(f"📌 eventsnextleague: {len(events)} matchs à venir")
-        except:
-            print("📌 eventsnextleague: ❌ erreur")
-        
-        # Endpoint 2: last events
-        url2 = f"{self.base_url}/eventslast.php"
-        params2 = {'id': 4328}
-        
-        try:
-            response = self.session.get(url2, params=params2, timeout=5)
-            data = response.json()
-            events = data.get('results', [])
-            print(f"📌 eventslast: {len(events)} derniers matchs")
-        except:
-            print("📌 eventslast: ❌ erreur")
 
-def send_diagnostic_report(message):
-    """Envoie le rapport de diagnostic sur Telegram"""
+def format_football_matches(events, date):
+    """
+    Formate les matchs de football pour Telegram
+    """
+    if not events:
+        return None
+    
+    # Grouper par ligue
+    leagues = {}
+    for event in events:
+        league = event.get('strLeague', 'Ligue inconnue')
+        if league not in leagues:
+            leagues[league] = []
+        leagues[league].append(event)
+    
+    # Construire le message
+    date_display = datetime.strptime(date, "%Y-%m-%d").strftime("%d/%m/%Y")
+    message = f"📅 *MATCHS DE FOOTBALL - {date_display}*\n\n"
+    
+    for league_name, league_events in leagues.items():
+        message += f"🏆 *{league_name}*\n"
+        message += "━" * 25 + "\n"
+        
+        for event in league_events:
+            home = event.get('strHomeTeam', '?')
+            away = event.get('strAwayTeam', '?')
+            
+            # Extraire l'heure
+            time_str = event.get('strTime', '?')
+            if time_str and time_str != '?' and len(time_str) > 5:
+                time_str = time_str[:5]
+            
+            message += f"⏱️ {time_str}\n"
+            message += f"⚽ {home} vs {away}\n\n"
+        
+        message += "\n"
+    
+    total = len(events)
+    message += f"━━━━━━━━━━━━━━━━━━\n"
+    message += f"📊 Total: {total} matchs de football\n"
+    message += "#Football #MatchsDuJour"
+    
+    return message
+
+def format_no_matches_message():
+    """
+    Message sympa quand il n'y a pas de football
+    """
+    today = datetime.now().strftime("%d/%m/%Y")
+    
+    return f"""
+📅 *{today} - Pas de football aujourd'hui* 😴
+
+Les championnats européens font une pause.
+
+📆 *À venir:*
+• Week-end: reprise des championnats
+• Ligue des Champions: mardi/mercredi
+
+🎯 *Prochains matchs:*
+Consultez le bot demain pour le programme !
+
+━━━━━━━━━━━━━━━━━━
+🔍 *Astuce:* Les matchs NCAA (basketball US) sont ignorés automatiquement.
+#Football #Repos #ProchainsMatchs
+"""
+
+def send_telegram_message(message):
+    """Envoie le message Telegram"""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     
     try:
@@ -174,63 +180,65 @@ def send_diagnostic_report(message):
             timeout=10
         )
         return response.status_code == 200
-    except:
+    except Exception as e:
+        logging.error(f"❌ Erreur Telegram: {e}")
         return False
 
-def run_diagnostic():
-    """Exécute le diagnostic complet"""
-    print("\n" + "="*70)
-    print("🔧 DIAGNOSTIC COMPLET - POURQUOI AUCUN MATCH ?")
-    print("="*70 + "\n")
+def run():
+    """Fonction principale"""
+    print("\n" + "="*60)
+    print("⚽ BOT FOOTBALL - FILTRE NCAA OFF")
+    print("="*60 + "\n")
     
-    diag = FootballAPIDiagnostic()
-    
-    # 1. Test connexion API
-    if not diag.test_api_connection():
-        print("\n❌ L'API elle-même ne répond pas!")
-        message = "⚠️ *Problème API TheSportsDB*\n\nL'API ne répond pas. Vérifiez plus tard."
-        send_diagnostic_report(message)
+    # Vérification configuration
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("❌ Configuration Telegram manquante")
         return
     
-    # 2. Test formats de date
-    diag.test_date_format()
+    # Initialisation
+    api = FootballOnlyAPI()
     
-    # 3. Test quelques ligues spécifiques
-    print("\n📡 TEST LIGUES SPÉCIFIQUES")
-    any_match_found = False
-    for league_name, league_id in diag.verified_leagues.items():
-        events = diag.test_known_league(league_id, league_name)
-        if events:
-            any_match_found = True
+    # Récupérer les matchs de football du jour
+    today = datetime.now().strftime("%Y-%m-%d")
+    football_matches = api.get_todays_football()
     
-    # 4. Recherche large sur plusieurs jours
-    found_in_future = diag.search_any_event(days=10)
-    
-    # 5. Test endpoints alternatifs
-    diag.test_alternative_endpoints()
-    
-    # 6. Conclusion
-    print("\n" + "="*70)
-    print("📊 RAPPORT FINAL")
-    print("="*70)
-    
-    if any_match_found:
-        print("✅ Des matchs existent pour aujourd'hui dans certaines ligues!")
-        message = "✅ *Matchs trouvés aujourd'hui!*\n\nLe bot fonctionne correctement."
-    elif found_in_future:
-        print("⚠️ Pas de match aujourd'hui, MAIS il y en a dans les prochains jours.")
-        message = "📅 *Pas de match aujourd'hui*\n\nMais des matchs sont programmés dans les prochains jours. Le bot est opérationnel."
+    if football_matches:
+        # Des matchs de football aujourd'hui !
+        message = format_football_matches(football_matches, today)
+        print(f"✅ {len(football_matches)} matchs de football trouvés!")
     else:
-        print("❌ Aucun match trouvé nulle part - problème probable avec l'API")
-        message = "⚠️ *Problème détecté*\n\nAucun match trouvé sur aucune période. L'API TheSportsDB a peut-être changé."
+        # Pas de football aujourd'hui
+        print("ℹ️ Aucun match de football aujourd'hui")
+        
+        # Chercher les prochains jours
+        print("🔍 Recherche des prochains matchs de football...")
+        next_days = api.get_next_football_days(days=7)
+        
+        if next_days:
+            # Afficher les prochains jours avec football
+            schedule = "\n".join([
+                f"📆 {day['date']}: {day['count']} matchs"
+                for day in next_days[:3]
+            ])
+            
+            message = f"""
+📅 *Pas de football aujourd'hui*
+
+🎯 *Prochains matchs:*
+{schedule}
+
+🔄 Revenez demain pour le programme complet !
+#Football #ProchainsMatchs
+"""
+        else:
+            # Vraiment aucun match nulle part
+            message = format_no_matches_message()
     
-    print("="*70)
-    
-    # Envoyer le rapport sur Telegram
-    if send_diagnostic_report(message):
-        print("\n✅ Rapport envoyé sur Telegram")
+    # Envoyer sur Telegram
+    if send_telegram_message(message):
+        print("✅ Message envoyé sur Telegram")
     else:
-        print("\n❌ Échec envoi rapport")
+        print("❌ Échec envoi")
 
 if __name__ == "__main__":
-    run_diagnostic()
+    run()
