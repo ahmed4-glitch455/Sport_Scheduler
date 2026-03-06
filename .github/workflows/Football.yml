@@ -27,6 +27,6 @@ jobs:
       env:
         # CORRECTION ICI : Ajout de "secrets."
         FOOT_API: ${{ secrets.FOOT_API }}
-        TELEGRAM_API: ${{ secrets.TELEGRAM_API }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python main.py
