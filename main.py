@@ -1,98 +1,111 @@
-import requests
+import http.client
+import json
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # --- CONFIGURATION ---
-RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "aae4f48e19msh089011944c89f58p11391cjsne9ade8487bd1")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-class APIFootball:
-    """Client simple pour récupérer uniquement les matchs du jour"""
+class FreeFootballAPI:
+    """Client pour free-football-api-data.p.rapidapi.com"""
     
     def __init__(self, api_key):
         self.api_key = api_key
-        self.host = "api-football-v1.p.rapidapi.com"
-        self.headers = {
-            'x-rapidapi-key': api_key,
+        self.host = "free-football-api-data.p.rapidapi.com"
+    
+    def get_scheduled_events(self, date=None):
+        """Récupère les matchs programmés pour une date"""
+        if not date:
+            date = datetime.now().strftime("%Y-%m-%d")
+        
+        conn = http.client.HTTPSConnection(self.host)
+        headers = {
+            'x-rapidapi-key': self.api_key,
             'x-rapidapi-host': self.host
         }
-    
-    def get_today_fixtures(self):
-        """Récupère UNIQUEMENT les matchs du jour"""
-        today = datetime.now().strftime("%Y-%m-%d")
         
-        url = "https://api-football-v1.p.rapidapi.com/v3/fixtures"
-        params = {
-            'date': today,
-            'timezone': 'Africa/Casablanca',  # Adaptez à votre fuseau
-            'status': 'NS-TBD'  # NS = Not Started, TBD = To Be Defined
-        }
+        endpoint = f"/football-scheduled-events?date={date}"
+        logging.info(f"📅 Récupération des matchs du {date}...")
         
         try:
-            print(f"📅 Récupération des matchs du {today}...")
-            response = requests.get(url, headers=self.headers, params=params, timeout=10)
-            response.raise_for_status()
-            data = response.json()
+            conn.request("GET", endpoint, headers=headers)
+            res = conn.getresponse()
+            data = res.read()
             
-            return data.get('response', [])
+            if res.status == 200:
+                return json.loads(data.decode("utf-8"))
+            else:
+                logging.error(f"Erreur {res.status}: {data.decode('utf-8')}")
+                return None
         except Exception as e:
-            print(f"❌ Erreur: {e}")
-            return []
+            logging.error(f"Erreur connexion: {e}")
+            return None
+        finally:
+            conn.close()
     
-    def get_tv_channels(self, fixture_id):
-        """Récupère les chaînes TV pour un match (si disponibles)"""
-        # Note: Les infos TV peuvent nécessiter un autre endpoint
-        # Pour l'instant, on simule ou on laisse vide
-        return []
+    def get_multiple_dates(self, days=7):
+        """Récupère les matchs pour plusieurs jours"""
+        all_matches = []
+        today = datetime.now()
+        
+        for i in range(days):
+            date = (today + timedelta(days=i)).strftime("%Y-%m-%d")
+            events = self.get_scheduled_events(date)
+            
+            if events and events.get('events'):
+                all_matches.extend(events['events'])
+                logging.info(f"✅ {date}: {len(events['events'])} matchs")
+            else:
+                logging.info(f"ℹ️ {date}: 0 match")
+        
+        return all_matches
 
-def format_fixtures_only(fixtures):
-    """Formate UNIQUEMENT les matchs sans scores"""
-    if not fixtures:
+def format_events(events):
+    """Formate les matchs pour Telegram"""
+    if not events:
         return "📭 Aucun match programmé aujourd'hui."
-    
-    message = "📅 *MATCHS DU JOUR*\n\n"
     
     # Grouper par ligue
     leagues = {}
-    for match in fixtures:
-        league_name = match['league']['name']
-        if league_name not in leagues:
-            leagues[league_name] = []
-        leagues[league_name].append(match)
+    for event in events:
+        league = event.get('league', 'Ligue inconnue')
+        if league not in leagues:
+            leagues[league] = []
+        leagues[league].append(event)
     
-    # Construire le message
+    message = "📅 *MATCHS PROGRAMMÉS*\n\n"
+    
     for league_name, matches in leagues.items():
         message += f"🏆 *{league_name}*\n"
         message += "━" * 25 + "\n"
         
-        for match in matches:
-            # Heure du match
-            timestamp = match['fixture']['timestamp']
-            match_time = datetime.fromtimestamp(timestamp).strftime("%H:%M")
+        for match in matches[:10]:  # Max 10 par ligue
+            home = match.get('homeTeam', '?')
+            away = match.get('awayTeam', '?')
+            time = match.get('time', '?')
+            date = match.get('date', '')
             
-            # Équipes
-            home = match['teams']['home']['name']
-            away = match['teams']['away']['name']
+            # Format de l'heure
+            if time and time != '?':
+                time_display = time
+            else:
+                time_display = 'Horaire inconnu'
             
-            message += f"⏱️ {match_time}\n"
-            message += f"⚽ {home} vs {away}\n"
-            
-            # Statut (optionnel, pour info)
-            status = match['fixture']['status']['long']
-            if status != "Not Started":
-                message += f"📌 {status}\n"
-            
-            message += "\n"
+            message += f"⏱️ {time_display}\n"
+            message += f"⚽ {home} vs {away}\n\n"
         
         message += "\n"
     
-    # Ajouter un footer simple
-    message += "━" * 35 + "\n"
-    message += "#Football #MatchsDuJour"
+    # Ajouter un résumé
+    total = len(events)
+    message += f"━━━━━━━━━━━━━━━━━━\n"
+    message += f"📊 Total: {total} matchs programmés\n"
+    message += "#Football #MatchsProgrammés"
     
     return message
 
@@ -111,35 +124,73 @@ def send_telegram_message(message):
             timeout=10
         )
         return response.status_code == 200
-    except:
+    except Exception as e:
+        logging.error(f"Erreur Telegram: {e}")
+        return False
+
+def test_endpoint():
+    """Test simple de l'endpoint"""
+    print("\n🔍 TEST DE L'ENDPOINT")
+    print("="*40)
+    
+    api = FreeFootballAPI(RAPIDAPI_KEY)
+    
+    # Test avec aujourd'hui
+    today = datetime.now().strftime("%Y-%m-%d")
+    data = api.get_scheduled_events(today)
+    
+    if data:
+        print(f"✅ Connexion réussie!")
+        print(f"📊 Données reçues: {json.dumps(data, indent=2)[:500]}...")
+        return True
+    else:
+        print("❌ Échec connexion")
         return False
 
 def run():
+    """Fonction principale"""
     print("\n" + "="*50)
-    print("⚽ BOT MATCHS DU JOUR")
+    print("⚽ BOT MATCHS PROGRAMMÉS")
     print("="*50 + "\n")
     
-    # Vérification des clés
-    if not all([RAPIDAPI_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID]):
-        print("❌ Clés API manquantes")
+    # Test de connexion
+    if not test_endpoint():
+        print("\n❌ Arrêt du bot - API inaccessible")
         return
     
     # Initialisation
-    api = APIFootball(RAPIDAPI_KEY)
+    api = FreeFootballAPI(RAPIDAPI_KEY)
     
     # Récupérer les matchs du jour
-    fixtures = api.get_today_fixtures()
+    today = datetime.now().strftime("%Y-%m-%d")
+    events_data = api.get_scheduled_events(today)
     
-    # Formatage simple (matchs uniquement)
-    message = format_fixtures_only(fixtures)
+    if events_data and events_data.get('events'):
+        events = events_data['events']
+        message = format_events(events)
+        print(f"\n✅ {len(events)} matchs trouvés")
+    else:
+        # Si pas de matchs aujourd'hui, chercher dans les prochains jours
+        print("\n🔍 Aucun match aujourd'hui, recherche dans les prochains jours...")
+        all_events = api.get_multiple_dates(days=5)
+        
+        if all_events:
+            message = format_events(all_events)
+            message = "📅 *PROCHAINS MATCHS*\n\n" + message
+            print(f"\n✅ {len(all_events)} matchs trouvés dans les 5 prochains jours")
+        else:
+            message = "📭 Aucun match programmé dans les 5 prochains jours."
+            print("\n❌ Aucun match trouvé")
     
     # Envoyer sur Telegram
     if send_telegram_message(message):
-        print(f"✅ {len(fixtures)} matchs envoyés sur Telegram")
+        print("\n✅ Message envoyé sur Telegram")
     else:
-        print("❌ Échec de l'envoi")
+        print("\n❌ Erreur envoi Telegram")
     
     print("\n" + "="*50)
 
 if __name__ == "__main__":
+    # Nécessaire pour les requêtes HTTP
+    import requests
     run()
