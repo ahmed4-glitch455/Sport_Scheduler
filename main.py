@@ -7,7 +7,7 @@ from pathlib import Path
 import time
 
 # --- CONFIGURATION ---
-SPORTMONKS_API_KEY = os.getenv("SPORTMONKS_API_KEY")
+FOOT_API = os.getenv("FOOT_API")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -389,14 +389,14 @@ def run():
     logging.info("=" * 50)
     
     # Vérifications
-    if not all([SPORTMONKS_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID]):
+    if not all([FOOT_API, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID]):
         logging.error("❌ Clés API manquantes")
         return
     
     logging.info("✅ Configuration validée")
     
     # Initialisation API
-    sport_api = SportMonksAPI(SPORTMONKS_API_KEY)
+    sport_api = SportMonksAPI(FOOT_API)
     
     # Test connexion
     if not test_api_connection(sport_api):
