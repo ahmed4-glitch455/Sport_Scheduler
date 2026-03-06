@@ -1,32 +1,24 @@
-name: Football Scheduler
+name: Football Bot Quotidien
 
 on:
   schedule:
-    - cron: '0 8 * * *'
+    - cron: '0 9,12,15,18,21 * * *'  # 5 fois par jour
   workflow_dispatch:
 
 jobs:
-  build:
+  run-football-bot:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Récupérer le code du dépôt
-      uses: actions/checkout@v3
-
-    - name: Installer Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
-
-    - name: Installer les dépendances
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-
-    - name: Exécuter le main
-      env:
-        # CORRECTION ICI : Ajout de "secrets."
-        FOOT_API: ${{ secrets.FOOT_API }}
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      run: python main.py
+      - uses: actions/checkout@v3
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Run Bot
+        env:
+          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python main.py
