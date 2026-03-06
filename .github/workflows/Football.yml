@@ -28,7 +28,7 @@ jobs:
     - name: Exécuter le scraper
       env:
         # On injecte les secrets GitHub dans le script
-        FOOT_API: ${{ FOOT_API }}
+        FOOT_API: ${{ secrets.FOOT_API }}
         TELEGRAM_API: ${{ secrets.TELEGRAM_API }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: python scraper.py
