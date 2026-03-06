@@ -1,8 +1,8 @@
-name: Football Bot Quotidien
+name: Football Bot Daily
 
 on:
   schedule:
-    - cron: '0 9,12,15,18,21 * * *'  # 5 fois par jour
+    - cron: '0 8,12,18,20 * * *'  # 8h, 12h, 18h, 20h UTC
   workflow_dispatch:
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
         run: pip install requests
       - name: Run Bot
         env:
-          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+          FOOTBALL_DATA_API_KEY: ${{ secrets.FOOTBALL_DATA_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
